@@ -1,0 +1,175 @@
+---
+- name: Add parameters /etc/hosts
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    block: | 
+      10.70.43.190 dc1.test.loc dc1
+      10.70.43.191 dc2.test.loc dc2
+ 
+- name: Add dns in /etc/resolv.conf
+  ansible.builtin.lineinfile:
+    path: /etc/resolv.conf
+    line: nameserver 10.70.43.190
+  
+
+- name: Update repository
+  community.general.apt_rpm:
+     update_cache: yes
+
+- name: Install packages
+  community.general.apt_rpm:
+    pkg:
+    - task-samba-dc
+    - chrony
+    - bind
+    - rsync
+    - osync
+
+    
+
+- name: Delete file conf
+  ansible.builtin.file: 
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/samba/smb.conf
+    - /var/cache/samba
+
+- name: Create dir sysvol
+  ansible.builtin.file:
+    path: /var/lib/samba/sysvol
+    state: directory
+    recurse: true
+
+- name: Start service bind on dc1
+  ansible.builtin.systemd:
+    name: bind
+    state: started
+  delegate_to: dc1
+
+- name: Restart service samba on dc1
+  ansible.builtin.systemd:
+    name: samba
+    state: restarted
+  delegate_to: dc1
+
+#- name: Add ip address on pdc for dc2
+#  shell: samba-tool dns add 10.70.43.190 test.loc dc2 A 10.70.43.191 -U Administrator --password=1qaz@WSX
+
+
+- name: Change config /etc/krb5.conf
+  ansible.builtin.lineinfile:
+    path: /etc/krb5.conf
+    regexp: '{{ item.regexp }}'
+    line: '{{ item.line }}'
+  loop:
+    - regexp: '^# default_realm = EXAMPLE.COM'
+      line: default_realm = TEST.LOC
+    - regexp: 'dns_lookup_realm = true'
+      line: dns_lookup_realm = false
+
+- name: Join AD Domain Configuration
+  ansible.builtin.command: samba-tool domain join {{ realm }} DC  -U Administrator --password={{ adminpass }} --option="dns forwarder=77.88.8.8  77.88.8.1" --realm={{realm}}
+  
+- name: Start service Samba
+  ansible.builtin.systemd:
+    name: samba
+    state: started
+    enabled: true
+
+- name: Change config sync.conf
+  ansible.builtin.lineinfile:
+    path: /etc/osync/sync.conf
+    regexp: '{{ item.regexp }}'
+    line: '{{ item.line }}'
+  loop:
+    - regexp: 'INSTANCE_ID="sync_test"'
+      line: INSTANCE_ID="sync_sysvol"
+    - regexp: 'INITIATOR_SYNC_DIR="/home/git/osync/dir1'
+      line: INITIATOR_SYNC_DIR="/var/lib/samba/sysvol"
+    - regexp:
+      line:
+      
+
+
+
+
+
+
+
+# - name: Add dns sever
+#   ansible.builtin.copy:
+#     src: resolv.conf
+#     dest: /etc/resolv.conf
+
+#- name: Join AD Domain Configuration
+#  ansible.builtin.command: samba-tool domain join {{ realm }} DC -W AD -U Administrator --password={{ adminpass }} 
+
+# - name: Add a new string
+#   ansible.builtin.lineinfile:
+#     dest: /etc/samba/smb.conf
+#     insertbefore: 'netbios name = DC2'
+#     line: 'dns forwarder = 77.88.8.8  77.88.8.1'
+
+
+# - name: Copy file krb5.conf
+#   ansible.builtin.copy:
+#     src: /var/lib/samba/private/krb5.conf
+#     dest: /etc/krb5.conf
+#     remote_src: true
+
+# - name: stop service systemd-resolved
+#   ansible.builtin.systemd:
+#     name: systemd-resolved
+#     state: stopped
+#     enabled: false
+
+# - name: Unlink file /etc/resolv.conf
+#   ansible.builtin.file:
+#     path: /etc/resolv.conf
+#     state: absent
+
+# - name: Create file /etc/resolv.conf and add parameters
+#   ansible.builtin.blockinfile:
+#     create: true
+#     path: /etc/resolv.conf
+#     block: |
+#       nameserver 192.168.56.15
+#       search test.loc
+
+# - name: Copy file configuration chronyd
+#   ansible.builtin.copy:
+#     src: chrony.conf
+#     dest: /etc/chrony/chrony.conf
+#     follow: yes
+
+# - name: Stoped and masked service
+#   ansible.builtin.systemd:
+#     state: stopped
+#     masked: yes
+#     enabled: false
+#     name: "{{ item }}"
+#   with_items:
+#     - smbd
+#     - nmbd
+#     - winbind
+
+# - name: Unmask and start service samba-ad-dc
+#   ansible.builtin.systemd:
+#     name: samba-ad-dc
+#     state: started
+#     masked: no 
+#     enabled: yes
+
+# - name: Change file ownership, group and permissions /var/lib/samba/ntp_signd
+#   ansible.builtin.file:
+#     path: /var/lib/samba/ntp_signd
+#     owner: root
+#     group: _chrony
+#     mode: '0755'
+
+# #- name: Synchronization
+# #  ansible.builtin.command: /usr/bin/rsync -XAavz --log-file /var/log/sysvol-sync.log --delete-after -f"+ */" -f"- *" /var/lib/samba/{sysvol,netlogon}
+# #
+# #-- name: Synchronization
+# #  ansible.builtin.command: root@dc  

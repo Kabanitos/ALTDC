@@ -1,0 +1,234 @@
+---
+- name: Add parameters /etc/hosts
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    line: 10.70.43.190 dc1.test.loc dc1
+
+- name: Update repository
+  community.general.apt_rpm:
+    update_cache: yes
+
+- name: Install packages
+  community.general.apt_rpm:
+    pkg:
+    - task-samba-dc
+    - chrony
+    - bind
+    
+
+- name: Delete file conf
+  ansible.builtin.file: 
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/samba/smb.conf
+    - /etc/krb5.conf
+    - /var/cache/samba
+
+- name: Create dir
+  ansible.builtin.file:
+    path: /var/lib/samba/sysvol
+    state: directory
+    recurse: true
+
+- name: Change config /etc/sysconfig/network
+  ansible.builtin.lineinfile:
+    path: /etc/sysconfig/network
+    regexp: '^HOSTNAME=dc1'
+    line: HOSTNAME=dc1.test.loc
+
+- name: Reboot server 
+  ansible.builtin.reboot:
+   reboot_timeout: 100
+
+
+- name: Disable chroot
+  shell: control bind-chroot disabled
+
+- name: Disable KRB5RCACHETYPE
+  shell: grep -q KRB5RCACHETYPE /etc/sysconfig/bind || echo 'KRB5RCACHETYPE="none"' >> /etc/sysconfig/bind
+
+- name: Connect plugin BIND_DLZ
+  shell: grep -q 'bind-dns' /etc/bind/named.conf || echo 'include "/var/lib/samba/bind-dns/named.conf";' >> /etc/bind/named.conf
+
+- name: Backup file /etc/bind/options.conf 
+  ansible.builtin.copy:
+    src: /etc/bind/options.conf
+    dest: /etc/bind/options.conf.back
+    remote_src: true
+
+- name: Copy file options.conf in directory /etc/bind/options
+  ansible.builtin.copy:
+    src: options.conf
+    dest: /etc/bind/
+
+- name: Stop BIND9
+  ansible.builtin.systemd:
+    name: bind
+    state: stopped
+
+#- name: Reboot server 
+#  ansible.builtin.reboot:
+#   reboot_timeout: 100
+
+- name: Create AD Domain Configuration
+  ansible.builtin.command: samba-tool domain provision --server-role=dc --use-rfc2307 --dns-backend=BIND9_DLZ --domain={{ domain }} --adminpass={{ adminpass }} --realm={{ realm }} --option="dns forwarder=77.88.8.8  77.88.8.1"
+
+- name: Move file krb5.conf in direcroty /etc
+  ansible.builtin.copy:
+    src: /var/lib/samba/private/krb5.conf
+    dest: /etc/krb5.conf
+    remote_src: true
+
+- name: Add line nameserver
+  ansible.builtin.lineinfile:
+    path: /etc/resolvconf.conf
+    line: name_servers=127.0.0.1
+    
+- name: Update DNS address
+  shell: resolvconf -u
+
+- name: Create file /etc/resolv.conf and add parameters
+  ansible.builtin.blockinfile:
+    create: true
+    path: /etc/resolv.conf
+    block: |
+      nameserver localhost
+      search test.loc
+
+- name: Copy file configuration chronyd
+  ansible.builtin.copy:
+    src: chrony.conf
+    dest: /etc/chrony.conf
+    follow: yes 
+
+- name: Change file ownership, group and permissions /var/lib/samba/ntp_signd
+  ansible.builtin.file:
+    state: directory
+    path: /var/lib/samba/ntp_signd
+    owner: root
+    group: _chrony
+    mode: '0750'
+
+- name: Start service Samba
+  ansible.builtin.systemd:
+    name: samba
+    state: started
+    enabled: true
+
+- name: Start BIND9
+  ansible.builtin.systemd:
+    name: bind
+    state: started
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#- name: stop service systemd-resolved
+#  ansible.builtin.systemd:
+#    name: systemd-resolved
+#    state: stopped
+#    enabled: false
+
+#- name: Unlink file /etc/resolv.conf
+#  ansible.builtin.file:
+#    path: /etc/resolv.conf
+#    state: absent
+
+#- name: Create file /etc/resolv.conf and add parameters
+#  ansible.builtin.blockinfile:
+#    create: true
+#    path: /etc/resolv.conf
+#    block: |
+#      nameserver 192.168.56.10
+#      search test.loc
+
+#- name: Copy file configuration chronyd
+#  ansible.builtin.copy:
+#    src: chrony.conf
+#    dest: /etc/chrony/chrony.conf
+#    follow: yes
+
+#- name: Stoped and masked service
+#  ansible.builtin.systemd:
+#    state: stopped
+#    masked: yes
+#    enabled: false
+#    name: "{{ item }}"
+#  with_items:
+#    - smbd
+#    - nmbd
+#    - winbind
+
+#- name: Unmask and start service samba-ad-dc
+#  ansible.builtin.systemd:
+#    name: samba-ad-dc
+#    state: started
+#    masked: no 
+#    enabled: yes
+
+#- name: Change file ownership, group and permissions /var/lib/samba/ntp_signd
+#  ansible.builtin.file:
+#    path: /var/lib/samba/ntp_signd
+#    owner: root
+#    group: _chrony
+#    mode: '0750'
+
+#- name: generate SSH key
+#  ansible.builtin.user:
+#    name: root
+#    generate_ssh_key: yes
+#    ssh_key_bits: 2048
+#    ssh_key_file: .ssh/id_rsa
+
+#- name: view ssh key pub
+#  shell: cat /root/.ssh/id_rsa.pub
+#  register: ssh_key_client
+
+#- name: input ssh key client in server file
+#  ansible.builtin.lineinfile:
+#    path: /root/.ssh/authorized_keys
+#    line: '{{ssh_key_client.stdout}}' 
+#  delegate_to: dc2
+
+#- name: Create a directory /.ssh/ctl
+#  ansible.builtin.file:
+#    path: /root/.ssh/ctl
+#    state: directory
+#   mode: '0755'
+
+#- name: Copy config file
+#  ansible.builtin.copy:
+#    src: config
+#    dest: /root/.ssh/ctl/config
+#    follow: yes
+
+#- name: Create file sysvol-sync.log
+#  ansible.builtin.file:
+#    path: /var/log/unison-sync.log
+#    state: touch
+#    mode: '640'
+
+#- name: Create a directory /root/.unison
+#  ansible.builtin.file:
+#    path: /root/.unison
+#    state: directory
+#    mode: '0755'
+
+

@@ -1,0 +1,19 @@
+- hosts: dc1
+  become: yes
+  become_user: root
+  
+  roles:
+  # - ad_master
+  #- openssl
+  # - date
+  vars_files:
+    - vars.yml
+
+- hosts: dc2
+  become: yes
+  become_user:
+
+  roles:
+    - ad_slave
+  vars_files:
+    - vars.yml
